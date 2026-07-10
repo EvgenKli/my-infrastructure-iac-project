@@ -1,1 +1,0 @@
-selectel_password = "A2?m?Eh,E4.dIF#KehD0"
