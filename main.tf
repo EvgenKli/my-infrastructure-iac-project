@@ -13,7 +13,7 @@ terraform {
   }
 }
 
-# 2. Глобальная авторизация в Selectel (Используем переменные!)
+# 2. Глобальная авторизация в Selectel
 provider "selectel" {
   domain_name = "486809"
   username    = "evgenkli"
@@ -87,7 +87,7 @@ resource "openstack_networking_router_v2" "router" {
   external_network_id = data.openstack_networking_network_v2.external_network.id
 }
 
-# 5.4 Соединяем роутер с нашей приватной подсетью
+# 5.4 Соединяем роутер с приватной подсетью
 resource "openstack_networking_router_interface_v2" "router_interface" {
   router_id = openstack_networking_router_v2.router.id
   subnet_id = openstack_networking_subnet_v2.subnet.id
@@ -98,13 +98,13 @@ resource "openstack_networking_floatingip_v2" "floating_ip" {
   pool = "external-network"
 }
 
-# 5.6 Твой технологический апгрейд: Создаем сетевой порт и вешаем на него группы безопасности
+# 5.6 Создаем сетевой порт и вешаем группы безопасности
 resource "openstack_networking_port_v2" "backend_port" {
   name           = "backend-server-port"
   network_id     = openstack_networking_network_v2.network.id
   admin_state_up = true
 
-  # Задаем список разрешенных групп безопасности (исключили слово default)
+  # Задаем список разрешенных групп безопасности
   security_group_ids = [
     openstack_networking_secgroup_v2.secgroup_db.id
   ]
@@ -139,7 +139,7 @@ resource "openstack_networking_secgroup_rule_v2" "allow_postgres" {
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
 
-# 6.5 Твое исправление для порта 22: разрешить входящий SSH со всего интернета
+# 6.5 Разрешаем входящий SSH со всего интернета
 resource "openstack_networking_secgroup_rule_v2" "allow_ssh" {
   direction         = "ingress"
   ethertype         = "IPv4"
@@ -158,7 +158,7 @@ resource "openstack_compute_instance_v2" "msk_backend" {
   flavor_name       = "BL1.1-2048"
   key_pair          = openstack_compute_keypair_v2.my_keypair.name
 
-  # Подключаем сервер к сети строго через созданный выше умный порт!
+  # Подключаем сервер к сети строго через созданный порт
   network {
     port = openstack_networking_port_v2.backend_port.id
   }
@@ -174,7 +174,7 @@ resource "openstack_compute_instance_v2" "msk_backend" {
   }
 }
 
-# 9. Твое финальное исправление: Привязываем Floating IP к порту по .address через модуль networking
+# 9. Привязываем Floating IP к порту по .address через модуль networking
 resource "openstack_networking_floatingip_associate_v2" "fip_associate" {
   floating_ip = openstack_networking_floatingip_v2.floating_ip.address
   port_id     = openstack_networking_port_v2.backend_port.id
