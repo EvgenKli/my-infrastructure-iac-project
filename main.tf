@@ -1,3 +1,5 @@
+#. ЭТАП 1. Настройка провайдеров, авторизация, создание сервера
+
 # 1. Настраиваем провайдеров
 terraform {
   required_version = ">= 1.9.0"
@@ -93,21 +95,50 @@ resource "openstack_networking_router_interface_v2" "router_interface" {
   subnet_id = openstack_networking_subnet_v2.subnet.id
 }
 
-# 5.5 Запрашиваем публичный IP-адрес
+# 5.5 Выделяем публичный IP-адрес
 resource "openstack_networking_floatingip_v2" "floating_ip" {
   pool = "external-network"
 }
 
+resource "openstack_networking_floatingip_associate_v2" "fip_associate" {
+  floating_ip = openstack_networking_floatingip_v2.floating_ip.address
+  port_id     = openstack_networking_port_v2.backend_port.id
+  depends_on  = [openstack_networking_router_interface_v2.router_interface]
+}
+
+# Выделяем публичный IP master-ноде
+resource "openstack_networking_floatingip_v2" "master_floating_ip" {
+  pool = "external-network"
+}
+
+resource "openstack_networking_floatingip_associate_v2" "master_fip_associate" {
+  floating_ip = openstack_networking_floatingip_v2.master_floating_ip.address
+  port_id     = openstack_networking_port_v2.k8s_master_port.id
+  depends_on  = [openstack_networking_router_interface_v2.router_interface]
+}
+
 # 5.6 Создаем сетевой порт и вешаем группы безопасности
 resource "openstack_networking_port_v2" "backend_port" {
-  name           = "backend-server-port"
-  network_id     = openstack_networking_network_v2.network.id
-  admin_state_up = true
+  name               = "backend-server-port"
+  network_id         = openstack_networking_network_v2.network.id
+  admin_state_up     = true
+  security_group_ids = [openstack_networking_secgroup_v2.secgroup_db.id]
+}
 
-  # Задаем список разрешенных групп безопасности
-  security_group_ids = [
-    openstack_networking_secgroup_v2.secgroup_db.id
-  ]
+# Порт для Мастер-ноды K8s в Москве
+resource "openstack_networking_port_v2" "k8s_master_port" {
+  name               = "k8s-master-port"
+  network_id         = openstack_networking_network_v2.network.id
+  admin_state_up     = true
+  security_group_ids = [openstack_networking_secgroup_v2.secgroup_db.id]
+}
+
+# Порт для Воркер-ноды K8s в Питере
+resource "openstack_networking_port_v2" "k8s_worker_port" {
+  name               = "k8s-worker-port"
+  network_id         = openstack_networking_network_v2.network.id
+  admin_state_up     = true
+  security_group_ids = [openstack_networking_secgroup_v2.secgroup_db.id]
 }
 
 # 6.1 Объявляем ID образа операционной системы
@@ -139,7 +170,40 @@ resource "openstack_networking_secgroup_rule_v2" "allow_postgres" {
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
 
-# 6.5 Разрешаем входящий SSH со всего интернета
+# 6.5 Добавляем правило: разрешить входящий порт 6443 (Kubernetes API) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_k8s_api" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 6443
+  port_range_max    = 6443
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 6.6 Добавляем правило: разрешить входящий порт 2379-2380 (etcd) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_k8s_etcd" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 2379
+  port_range_max    = 2380
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 6.7 Добавляем правило: разрешить входящий порт 10250 (Kubelet) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_k8s_let" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 10250
+  port_range_max    = 10250
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 6.8 Разрешаем входящий SSH со всего интернета
 resource "openstack_networking_secgroup_rule_v2" "allow_ssh" {
   direction         = "ingress"
   ethertype         = "IPv4"
@@ -150,7 +214,18 @@ resource "openstack_networking_secgroup_rule_v2" "allow_ssh" {
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
 
-# 7. Создаем сервер
+# 6.9 Добавляем правило: разрешить входящий порт 8085 (Port Forwarding) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_k8s_port_forward" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 8085
+  port_range_max    = 8085
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 7. Сервер 1. Создаем msk_backend
 resource "openstack_compute_instance_v2" "msk_backend" {
   name              = "msk-backend-node"
   region            = "ru-2"
@@ -158,7 +233,6 @@ resource "openstack_compute_instance_v2" "msk_backend" {
   flavor_name       = "BL1.1-2048"
   key_pair          = openstack_compute_keypair_v2.my_keypair.name
 
-  # Подключаем сервер к сети строго через созданный порт
   network {
     port = openstack_networking_port_v2.backend_port.id
   }
@@ -174,16 +248,60 @@ resource "openstack_compute_instance_v2" "msk_backend" {
   }
 }
 
-# 9. Привязываем Floating IP к порту по .address через модуль networking
-resource "openstack_networking_floatingip_associate_v2" "fip_associate" {
-  floating_ip = openstack_networking_floatingip_v2.floating_ip.address
-  port_id     = openstack_networking_port_v2.backend_port.id
+# Сервер 2. Создаем K8s Master Node
+resource "openstack_compute_instance_v2" "k8s_master" {
+  name              = "msk-k8s-master"
+  region            = "ru-2"
+  availability_zone = "ru-2a"
+  flavor_name       = "SL1.2-4096"
+  key_pair          = openstack_compute_keypair_v2.my_keypair.name
 
-  depends_on  = [openstack_networking_router_interface_v2.router_interface]
+  network {
+    port = openstack_networking_port_v2.k8s_master_port.id
+  }
+
+  block_device {
+    source_type           = "image"
+    destination_type      = "volume"
+    volume_size           = 20
+    boot_index            = 0
+    delete_on_termination = true
+    uuid                  = data.openstack_images_image_v2.ubuntu.id
+    volume_type           = "fast.ru-2a"
+  }
 }
 
-# 10. Выводим публичный адрес на экран
+# Севрер 3. Создаем K8s Worker Node
+resource "openstack_compute_instance_v2" "k8s_worker" {
+  name              = "spb-k8s-worker"
+  region            = "ru-2"
+  availability_zone = "ru-2b"
+  flavor_name       = "SL1.2-4096"
+  key_pair          = openstack_compute_keypair_v2.my_keypair.name
+
+  network {
+    port = openstack_networking_port_v2.k8s_worker_port.id
+  }
+
+  block_device {
+    source_type           = "image"
+    destination_type      = "volume"
+    volume_size           = 20
+    boot_index            = 0
+    delete_on_termination = true
+    uuid                  = data.openstack_images_image_v2.ubuntu.id
+    volume_type           = "fast.ru-2b"
+  }
+}
+
+# Выводим публичный адрес на экран
 output "backend_public_ip" {
   value       = openstack_networking_floatingip_v2.floating_ip.address
   description = "Public IP address of our cloud backend server"
+}
+
+# Выводим IP адрес Мастера на экран
+output "k8s_master_public_ip" {
+  value       = openstack_networking_floatingip_v2.master_floating_ip.address
+  description = "Public IP of Kubernetes Master Node"
 }
