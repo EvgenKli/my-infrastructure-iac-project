@@ -214,13 +214,13 @@ resource "openstack_networking_secgroup_rule_v2" "allow_ssh" {
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
 
-# 6.9 Добавляем правило: разрешить входящий порт 8085 (Port Forwarding) со всего интернета
+# 6.9 Добавляем правило: разрешить входящий порт 8080-8099 (Port Forwarding) со всего интернета
 resource "openstack_networking_secgroup_rule_v2" "allow_k8s_port_forward" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
-  port_range_min    = 8085
-  port_range_max    = 8085
+  port_range_min    = 8080
+  port_range_max    = 8099
   remote_ip_prefix  = "0.0.0.0/0"
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
