@@ -225,6 +225,39 @@ resource "openstack_networking_secgroup_rule_v2" "allow_k8s_port_forward" {
   security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
 }
 
+# 6.10 Добавляем правило: разрешить входящий порт 3000 (Grafana) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_grafana_port" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 3000
+  port_range_max    = 3000
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 6.11 Добавляем правило: разрешить входящий порт 9090 (Prometheus) со всего интернета
+resource "openstack_networking_secgroup_rule_v2" "allow_prometheus_port" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 9090
+  port_range_max    = 9090
+  remote_ip_prefix  = "0.0.0.0/0"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
+# 6.11 Добавляем правило: разрешить входящий порт 9100 (Monitoring) строго по локальной сети
+resource "openstack_networking_secgroup_rule_v2" "allow_monitoring_port" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 9100
+  port_range_max    = 9100
+  remote_ip_prefix  = "192.168.10.0/24"
+  security_group_id = openstack_networking_secgroup_v2.secgroup_db.id
+}
+
 # 7. Сервер 1. Создаем msk_backend
 resource "openstack_compute_instance_v2" "msk_backend" {
   name              = "msk-backend-node"
